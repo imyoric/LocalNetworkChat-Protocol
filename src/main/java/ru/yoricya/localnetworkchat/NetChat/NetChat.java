@@ -76,7 +76,7 @@ public class NetChat {
                         clientSocket.connect(new InetSocketAddress(s, 47844), 3000);
                         sendToSocket(clientSocket, data);
                         if(isDebug)
-                            System.out.println("[DEBUG] Broadcasting success to: "+s);
+                            System.out.println("[DEBUG] (Opened New Socket) Broadcasting success to: "+s);
                         synchronized (ConnectedSockets){
                             ConnectedSockets.putIfAbsent(s, clientSocket);
                         }
