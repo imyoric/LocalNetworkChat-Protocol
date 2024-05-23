@@ -9,9 +9,10 @@ import java.net.InetSocketAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.util.Base64;
-import java.util.concurrent.ForkJoinPool;
+import java.util.HashMap;
 
 public class NetChat {
+    public static boolean isDebug;
     private final byte[] rkBytes;
     public final String localAddr;
     private final MessageHandler messageHandler;
@@ -33,16 +34,9 @@ public class NetChat {
         messageHandler.onMessage(msg, null);
         broadCastMessage(localAddr, msg, rkBytes);
     }
-
-    static ForkJoinPool Threads = new ForkJoinPool();
+    static final HashMap<String, Socket> ConnectedSockets = new HashMap<>();
     static void broadCastMessage(String MyLocalIp, String msg, byte[] roomKey){
         if(msg == null || msg.isEmpty()) return;
-
-        String[] spl = MyLocalIp.split("\\.");
-        String[] alAddress = new String[256];
-        for(int i = 0; i!=alAddress.length; i++){
-            alAddress[i] = spl[0]+"."+spl[1]+"."+spl[2]+"."+i;
-        }
 
         byte[] message = msg.getBytes();
         byte[] body = new byte[message.length+4];
@@ -53,22 +47,53 @@ public class NetChat {
 
         byte[] data = Base64.getEncoder().encode(CryptoUtils.encrypt(body, roomKey));
 
-        for(String s: alAddress) {
-            if(s.equals(MyLocalIp)) continue;
+        String[] spl = MyLocalIp.split("\\.");
+        String[] alAddress = new String[256];
+        for(int i = 0; i!=alAddress.length; i++){
+            alAddress[i] = spl[0]+"."+spl[1]+"."+spl[2]+"."+i;
+        }
+
+        for (String s : alAddress) {
+            if (s.equals(MyLocalIp)) continue;
+
+            Socket socket;
+            synchronized (ConnectedSockets){
+                socket = ConnectedSockets.get(s);
+            }
+
+            if(socket != null && !socket.isClosed()) try {
+                sendToSocket(socket, data);
+
+                if (isDebug)
+                    System.out.println("[DEBUG] (Connected Socket) Broadcasting success to: " + s);
+                continue;
+            }catch (Exception ignore){}
             new Thread(new Runnable() {
                 @Override
                 public void run() {
-                    try{
+                    try {
                         Socket clientSocket = new Socket();
-                        clientSocket.connect(new InetSocketAddress(s, 47844), 1000);
-                        OutputStream clientOut = clientSocket.getOutputStream();
-                        clientOut.write(data);
-                        clientOut.close();
-                        clientSocket.close();
-                    }catch (Exception e){}
+                        clientSocket.connect(new InetSocketAddress(s, 47844), 3000);
+                        sendToSocket(clientSocket, data);
+                        if(isDebug)
+                            System.out.println("[DEBUG] Broadcasting success to: "+s);
+                        synchronized (ConnectedSockets){
+                            ConnectedSockets.putIfAbsent(s, clientSocket);
+                        }
+                    } catch (Exception e) {
+                        synchronized (ConnectedSockets){
+                            ConnectedSockets.remove(s);
+                        }
+                    }
                 }
             }).start();
         }
+    }
+
+    public static void sendToSocket(Socket s, byte[] data) throws Exception{
+        OutputStream clientOut = s.getOutputStream();
+        clientOut.write(data);
+        clientOut.flush();
     }
 
     public static ServerSocket initLocalServer(byte[] roomKey, MessageHandler handler) throws Exception{
@@ -80,26 +105,32 @@ public class NetChat {
                 try {
                     while (true) {
                         Socket s = serverSocket.accept();
-                        Threads.execute(new Runnable() {
+                        new Thread(new Runnable() {
                             @Override
                             public void run() {
                                 try {
                                     InputStream serverIn = s.getInputStream();
-                                    byte[] bs = new byte[serverIn.available()];
-                                    serverIn.read(bs);
 
-                                    bs = Base64.getDecoder().decode(bs);
-                                    bs = CryptoUtils.decrypt(bs, roomKey);
-                                    s.close();
+                                    while(!s.isClosed()){
+                                        if(serverIn.available() == 0) continue;
+                                        System.out.println(serverIn.available());
 
-                                    if(bs.length < 5) return;
-                                    if(!(bs[0] == 127 && bs[1] == 127 && bs[2] == 127 && bs[3] == 127)) return;
-                                    handler.onMessage(new String(bs).trim(), s.getInetAddress());
+                                        byte[] bs = new byte[serverIn.available()];
+                                        serverIn.read(bs);
+
+                                        bs = Base64.getDecoder().decode(bs);
+                                        bs = CryptoUtils.decrypt(bs, roomKey);
+                                        //s.close();
+
+                                        if(bs.length < 5) return;
+                                        if(!(bs[0] == 127 && bs[1] == 127 && bs[2] == 127 && bs[3] == 127)) return;
+                                        handler.onMessage(new String(bs).trim(), s.getInetAddress());
+                                    }
                                 }catch (Exception e){
                                     throw new RuntimeException(e);
                                 }
                             }
-                        });
+                        }).start();
                     }
                 }catch (Exception e){
                     throw new RuntimeException(e);

@@ -10,7 +10,7 @@ import java.util.*;
 
 public class Main {
 
-    public static void main(String[] args) throws Exception{
+    public static void main(String[] args) throws Exception {
         System.out.print("Введите код комнаты, или нажмите Enter для продолжения без кода: ");
         String roomKey = new Scanner(System.in).nextLine();
 
@@ -23,6 +23,8 @@ public class Main {
                     sendToChat("(ME)", message);
             }
         });
+
+        NetChat.isDebug = true;
 
         Scanner sc = new Scanner(System.in);
 
