@@ -4,4 +4,5 @@ import java.net.InetAddress;
 
 public interface MessageHandler {
     void onMessage(String message, InetAddress address);
+    default void onErrorWhileDecoding(Throwable error, InetAddress address){};
 }

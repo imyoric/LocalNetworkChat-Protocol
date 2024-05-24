@@ -8,8 +8,11 @@ import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
-import java.util.Base64;
+import java.nio.ByteBuffer;
+import java.util.Arrays;
 import java.util.HashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
 
 public class NetChat {
     public static boolean isDebug;
@@ -34,18 +37,28 @@ public class NetChat {
         messageHandler.onMessage(msg, null);
         broadCastMessage(localAddr, msg, rkBytes);
     }
-    static final HashMap<String, Socket> ConnectedSockets = new HashMap<>();
+//    static final HashMap<String, Socket> ConnectedSockets = new HashMap<>();
     static void broadCastMessage(String MyLocalIp, String msg, byte[] roomKey){
         if(msg == null || msg.isEmpty()) return;
 
         byte[] message = msg.getBytes();
-        byte[] body = new byte[message.length+4];
 
-        body[0] = body[1] = body[2] = body[3] = 127;
+        byte[] decodedData = new byte[message.length+64];
+        System.arraycopy(message, 0, decodedData, 64, message.length);
 
-        System.arraycopy(message, 0, body, 4, message.length);
+        decodedData[0] = 127;
+        decodedData[1] = -127;
 
-        byte[] data = Base64.getEncoder().encode(CryptoUtils.encrypt(body, roomKey));
+        byte[] encodedData = CryptoUtils.encrypt(decodedData, roomKey);
+
+        byte[] data = new byte[encodedData.length + 32];
+        System.arraycopy(encodedData, 0, data, 32, encodedData.length);
+
+        byte[] roomKeyHash = CryptoUtils.generateMd5(roomKey);
+        System.arraycopy(roomKeyHash, 0, data, 0, roomKeyHash.length);
+
+        byte[] timeUnit = ByteBuffer.allocate(8).putLong(System.currentTimeMillis()).array();
+        System.arraycopy(timeUnit, 0, data, roomKeyHash.length, timeUnit.length);
 
         String[] spl = MyLocalIp.split("\\.");
         String[] alAddress = new String[256];
@@ -56,18 +69,22 @@ public class NetChat {
         for (String s : alAddress) {
             if (s.equals(MyLocalIp)) continue;
 
-            Socket socket;
-            synchronized (ConnectedSockets){
-                socket = ConnectedSockets.get(s);
-            }
-
-            if(socket != null && !socket.isClosed()) try {
-                sendToSocket(socket, data);
-
-                if (isDebug)
-                    System.out.println("[DEBUG] (Connected Socket) Broadcasting success to: " + s);
-                continue;
-            }catch (Exception ignore){}
+//            Socket socket;
+//            synchronized (ConnectedSockets){
+//                socket = ConnectedSockets.get(s);
+//            }
+//
+//            if(socket != null && !socket.isClosed()) try {
+//                sendToSocket(socket, data);
+//
+//                if (isDebug)
+//                    System.out.println("[DEBUG] (Connected Socket) Broadcasting success to: " + s);
+//                continue;
+//            }catch (Exception ignore){
+//                try {
+//                    socket.close();
+//                }catch (Exception e){e.printStackTrace();}
+//            }
             new Thread(new Runnable() {
                 @Override
                 public void run() {
@@ -77,13 +94,13 @@ public class NetChat {
                         sendToSocket(clientSocket, data);
                         if(isDebug)
                             System.out.println("[DEBUG] (Opened New Socket) Broadcasting success to: "+s);
-                        synchronized (ConnectedSockets){
-                            ConnectedSockets.putIfAbsent(s, clientSocket);
-                        }
+//                        synchronized (ConnectedSockets){
+//                            ConnectedSockets.put(s, clientSocket);
+//                        }
                     } catch (Exception e) {
-                        synchronized (ConnectedSockets){
-                            ConnectedSockets.remove(s);
-                        }
+//                        synchronized (ConnectedSockets){
+//                            ConnectedSockets.remove(s);
+//                        }
                     }
                 }
             }).start();
@@ -92,12 +109,15 @@ public class NetChat {
 
     public static void sendToSocket(Socket s, byte[] data) throws Exception{
         OutputStream clientOut = s.getOutputStream();
+        clientOut.write(ByteBuffer.allocate(4).putInt(data.length).array());
         clientOut.write(data);
-        clientOut.flush();
+        s.close();
     }
-
+    static ExecutorService ThreadPool = new ScheduledThreadPoolExecutor(Runtime.getRuntime().availableProcessors());
+    static final HashMap<String, Long> PermanentlyBanned = new HashMap<>();
     public static ServerSocket initLocalServer(byte[] roomKey, MessageHandler handler) throws Exception{
         ServerSocket serverSocket = new ServerSocket(47844);
+        byte[] roomKeyHash = CryptoUtils.generateMd5(roomKey);
 
         new Thread(new Runnable() {
             @Override
@@ -105,32 +125,90 @@ public class NetChat {
                 try {
                     while (true) {
                         Socket s = serverSocket.accept();
-                        new Thread(new Runnable() {
+                        ThreadPool.execute(new Runnable() {
                             @Override
                             public void run() {
-                                try {
-                                    InputStream serverIn = s.getInputStream();
+                                String host = s.getInetAddress().getHostAddress();
+                                Long pb;
 
-                                    while(!s.isClosed()){
-                                        if(serverIn.available() == 0) continue;
-                                        System.out.println(serverIn.available());
+                                synchronized (PermanentlyBanned){
+                                    pb = PermanentlyBanned.get(host);
+                                }
 
-                                        byte[] bs = new byte[serverIn.available()];
-                                        serverIn.read(bs);
+                                if(pb != null && (System.currentTimeMillis() - pb) < 1000) {
+                                    try {
+                                        s.close();
+                                    }catch (Exception ignore){}
+                                    return;
+                                }
 
-                                        bs = Base64.getDecoder().decode(bs);
-                                        bs = CryptoUtils.decrypt(bs, roomKey);
-                                        //s.close();
+                                try{
+                                    InputStream inputStream = s.getInputStream();
 
-                                        if(bs.length < 5) return;
-                                        if(!(bs[0] == 127 && bs[1] == 127 && bs[2] == 127 && bs[3] == 127)) return;
-                                        handler.onMessage(new String(bs).trim(), s.getInetAddress());
+                                    byte[] dataLenBuffer = new byte[4];
+                                    inputStream.read(dataLenBuffer);
+
+                                    int dataLen = ByteBuffer.wrap(dataLenBuffer).getInt();
+
+                                    byte[] buffer = new byte[dataLen];
+                                    inputStream.read(buffer);
+
+                                    byte[] receivedRoomHash = new byte[16];
+                                    System.arraycopy(buffer, 0, receivedRoomHash, 0, 16);
+
+                                    if(!Arrays.equals(receivedRoomHash, roomKeyHash)){
+                                        s.close();
+                                        long cmls = System.currentTimeMillis();
+                                        synchronized (PermanentlyBanned){
+                                            PermanentlyBanned.put(host, cmls);
+                                        }
+                                        return;
                                     }
+
+                                    byte[] timeUnitBuffer = new byte[8];
+                                    System.arraycopy(buffer, 16, timeUnitBuffer, 0, 8);
+
+                                    long timeUnit = ByteBuffer.wrap(timeUnitBuffer).getLong();
+
+                                    if(isDebug)
+                                        System.out.println("[DEBUG] ping: "+(System.currentTimeMillis() - timeUnit)+"ms");
+
+                                    byte[] decodedData = new byte[buffer.length-32];
+                                    System.arraycopy(buffer, 32, decodedData, 0, decodedData.length);
+                                    decodedData = CryptoUtils.decrypt(decodedData, roomKey);
+
+                                    if(decodedData.length == 0){
+                                        s.close();
+                                        long cmls = System.currentTimeMillis();
+                                        synchronized (PermanentlyBanned){
+                                            PermanentlyBanned.put(host, cmls);
+                                        }
+                                        return;
+                                    }
+
+                                    if(decodedData[0] != 127 || decodedData[1] != -127){
+                                        s.close();
+                                        long cmls = System.currentTimeMillis();
+                                        synchronized (PermanentlyBanned){
+                                            PermanentlyBanned.put(host, cmls);
+                                        }
+                                        return;
+                                    }
+
+                                    byte[] decodedMessage = new byte[decodedData.length-64];
+                                    System.arraycopy(decodedData, 64, decodedMessage, 0, decodedMessage.length);
+                                    handler.onMessage(new String(decodedMessage).trim(), s.getInetAddress());
+
+                                    s.close();
                                 }catch (Exception e){
-                                    throw new RuntimeException(e);
+                                    try{
+                                        s.close();
+                                    }catch (Exception ignore){}
+                                    handler.onErrorWhileDecoding(e, s.getInetAddress());
                                 }
                             }
-                        }).start();
+                        });
+
                     }
                 }catch (Exception e){
                     throw new RuntimeException(e);
