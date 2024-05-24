@@ -150,7 +150,7 @@ public class NetChat {
                                 }
 
                                 //Check temporally ban
-                                if(pb != null && (System.currentTimeMillis() - pb) < 1000) {
+                                if(pb != null && (System.currentTimeMillis() - pb) < 1000) { //Temp ban 1sec
                                     try {
                                         s.close();
                                     }catch (Exception ignore){}
@@ -176,10 +176,8 @@ public class NetChat {
                                     //Check room key hash
                                     if(!Arrays.equals(receivedRoomHash, roomKeyHash)){
                                         s.close();
-                                        long cmls = System.currentTimeMillis();
-                                        synchronized (TemporallyBanned){
-                                            TemporallyBanned.put(host, cmls);
-                                        }
+                                        //Add temp ban
+                                        addTempBan(host);
                                         return;
                                     }
 
@@ -199,20 +197,17 @@ public class NetChat {
                                     //Check is decrypting success, is len == 0 - decrypting failed
                                     if(decodedData.length == 0){
                                         s.close();
-                                        long cmls = System.currentTimeMillis();
-                                        synchronized (TemporallyBanned){
-                                            TemporallyBanned.put(host, cmls);
-                                        }
+
+                                        //Add temp ban
+                                        addTempBan(host);
                                         return;
                                     }
 
                                     //Check control bytes
                                     if(decodedData[0] != 127 || decodedData[1] != -127){
                                         s.close();
-                                        long cmls = System.currentTimeMillis();
-                                        synchronized (TemporallyBanned){
-                                            TemporallyBanned.put(host, cmls);
-                                        }
+                                        //Add temp ban
+                                        addTempBan(host);
                                         return;
                                     }
 
@@ -243,5 +238,12 @@ public class NetChat {
         }).start();
 
         return serverSocket;
+    }
+
+    static void addTempBan(String host){
+        long cmls = System.currentTimeMillis();
+        synchronized (TemporallyBanned){
+            TemporallyBanned.put(host, cmls);
+        }
     }
 }
