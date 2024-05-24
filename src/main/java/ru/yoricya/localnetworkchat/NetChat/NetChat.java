@@ -22,7 +22,7 @@ public class NetChat {
     public final ServerSocket serverSocket;
     public NetChat(String roomKey, MessageHandler messageHandler){
         if(roomKey.isEmpty()) roomKey = "0";
-        rkBytes = CryptoUtils.generateMd5(roomKey.getBytes());
+        rkBytes = CryptoUtils.getSHAKey(roomKey);
         localAddr = IPUtils.getV4()[0];
         this.messageHandler = messageHandler;
         try {
