@@ -16,7 +16,7 @@ public class Main {
 
         NetChat netChat = new NetChat(roomKey, new MessageHandler() {
             @Override
-            public void onMessage(String message, InetAddress address) {
+            public void onMessage(String message, InetAddress address, boolean isReplyForYou) {
                 if(address != null)
                     sendToChat(address.getHostAddress(), message);
                 else
