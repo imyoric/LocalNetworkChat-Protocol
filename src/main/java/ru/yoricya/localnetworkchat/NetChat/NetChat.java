@@ -128,7 +128,7 @@ public class NetChat {
         s.close();
     }
     static ExecutorService ThreadPool = new ScheduledThreadPoolExecutor(Runtime.getRuntime().availableProcessors());
-    static final HashMap<String, Long> PermanentlyBanned = new HashMap<>();
+    static final HashMap<String, Long> TemporallyBanned = new HashMap<>();
     public static ServerSocket initLocalServer(byte[] roomKey, MessageHandler handler) throws Exception{
         ServerSocket serverSocket = new ServerSocket(47844);
         byte[] roomKeyHash = CryptoUtils.generateMd5(roomKey);
@@ -145,10 +145,11 @@ public class NetChat {
                                 String host = s.getInetAddress().getHostAddress();
                                 Long pb;
 
-                                synchronized (PermanentlyBanned){
-                                    pb = PermanentlyBanned.get(host);
+                                synchronized (TemporallyBanned){
+                                    pb = TemporallyBanned.get(host);
                                 }
 
+                                //Check temporally ban
                                 if(pb != null && (System.currentTimeMillis() - pb) < 1000) {
                                     try {
                                         s.close();
@@ -176,8 +177,8 @@ public class NetChat {
                                     if(!Arrays.equals(receivedRoomHash, roomKeyHash)){
                                         s.close();
                                         long cmls = System.currentTimeMillis();
-                                        synchronized (PermanentlyBanned){
-                                            PermanentlyBanned.put(host, cmls);
+                                        synchronized (TemporallyBanned){
+                                            TemporallyBanned.put(host, cmls);
                                         }
                                         return;
                                     }
@@ -199,8 +200,8 @@ public class NetChat {
                                     if(decodedData.length == 0){
                                         s.close();
                                         long cmls = System.currentTimeMillis();
-                                        synchronized (PermanentlyBanned){
-                                            PermanentlyBanned.put(host, cmls);
+                                        synchronized (TemporallyBanned){
+                                            TemporallyBanned.put(host, cmls);
                                         }
                                         return;
                                     }
@@ -209,8 +210,8 @@ public class NetChat {
                                     if(decodedData[0] != 127 || decodedData[1] != -127){
                                         s.close();
                                         long cmls = System.currentTimeMillis();
-                                        synchronized (PermanentlyBanned){
-                                            PermanentlyBanned.put(host, cmls);
+                                        synchronized (TemporallyBanned){
+                                            TemporallyBanned.put(host, cmls);
                                         }
                                         return;
                                     }
