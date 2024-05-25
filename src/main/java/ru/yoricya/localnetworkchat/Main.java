@@ -67,7 +67,7 @@ public class Main {
 
     public static String ArrToStr(String[] str, int startIndex){
         String s = "";
-        for(int i = startIndex; i != str.length; i++) s += str[i];
+        for(int i = startIndex; i != str.length; i++) s += str[i] + " ";
         return s;
     }
 

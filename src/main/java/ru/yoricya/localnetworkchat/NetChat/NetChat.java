@@ -32,7 +32,7 @@ public class NetChat {
         this.messageHandler = messageHandler;
 
         try {
-            serverSocket = initLocalServer(rkBytes, messageHandler);
+            serverSocket = initLocalServer(rkBytes, "devicePC", messageHandler);
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
@@ -226,7 +226,7 @@ public class NetChat {
                 socket = ConnectedSockets.get(s);
             }
 
-            if(socket != null && !socket.isClosed()){
+            if(socket != null && !socket.isClosed() && socket.isConnected() && !socket.isInputShutdown()){
                 inetAddressList.add(socket.getInetAddress());
                 continue;
             }
@@ -270,7 +270,7 @@ public class NetChat {
     static ExecutorService ThreadPool = new ScheduledThreadPoolExecutor(Runtime.getRuntime().availableProcessors());
     static final HashMap<String, Long> TemporallyBanned = new HashMap<>();
     static final HashMap<String, Socket> AvailableClients = new HashMap<>();
-    public static ServerSocket initLocalServer(byte[] roomKey, MessageHandler handler) throws Exception{
+    public static ServerSocket initLocalServer(byte[] roomKey, String deviceName, MessageHandler handler) throws Exception{
         ServerSocket serverSocket = new ServerSocket(47844);
         byte[] roomKeyHash = CryptoUtils.generateMd5(roomKey);
 
@@ -335,6 +335,18 @@ public class NetChat {
                                                     s.close();
                                                     //Add temp ban
                                                     addTempBan(host);
+                                                    break;
+                                                }
+
+                                                //Check is request for get device name
+                                                if(dataLenBuffer[0] == 35 && dataLenBuffer[5] == -35){
+                                                    byte[] deviceNameBuffer = deviceName.getBytes(StandardCharsets.UTF_8);
+
+                                                    OutputStream oStr = s.getOutputStream();
+                                                    oStr.write(ByteBuffer.allocate(6).put((byte) 30).putInt(deviceNameBuffer.length).put((byte) -30).array());
+                                                    oStr.write(deviceNameBuffer);
+
+                                                    s.close();
                                                     break;
                                                 }
 
